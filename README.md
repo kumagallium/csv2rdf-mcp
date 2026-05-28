@@ -8,11 +8,12 @@ Designed to compose with [Crucible](https://github.com/) (MCP registry) and [Gra
 
 ## Status
 
-**Phase 1 — papers + samples + curves end-to-end.** Ingester, MIE, compose, and CI are in place. The technology choices behind the stack (Oxigraph backend + togomcp MCP server) are documented in [`docs/architecture/phase05-decisions.md`](docs/architecture/phase05-decisions.md).
+**Phase 2 — drop CSV → auto reindex.** Phase 1 (papers + samples + curves ingester, MIE, compose, CI) is live; Phase 2 adds an upload API + watcher so dropping a CSV automatically reindexes Oxigraph. The technology choices behind the stack (Oxigraph backend + togomcp MCP server) are documented in [`docs/architecture/phase05-decisions.md`](docs/architecture/phase05-decisions.md).
 
 See:
 - [`docs/architecture/option-b.md`](docs/architecture/option-b.md) — Phase 1 architecture (Oxigraph + togomcp hybrid), role split with the DBCLS team
 - [`docs/architecture/phase05-decisions.md`](docs/architecture/phase05-decisions.md) — backend / ingester adoption rationale (Oxigraph, Python rdflib)
+- [`docs/architecture/phase2-watcher.md`](docs/architecture/phase2-watcher.md) — Phase 2 watcher + upload API design
 - [`docs/architecture/crucible-registration.md`](docs/architecture/crucible-registration.md) — registering csv2rdf-mcp on Crucible (Oxigraph runs separately on `mcp-net`)
 - [`docs/ontology/`](docs/ontology/) — Phase 1 ontology with Mermaid class diagram, RDFS/OWL TBox, and WebVOWL instructions for visual review
 - [`experiments/phase05/`](experiments/phase05) — spike code and logs for togopackage / Oxigraph / Morph-KGC
@@ -30,22 +31,31 @@ See:
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Repo scaffold, license, CI skeleton | done |
-| **0.5** | **Dependency validation (togopackage / Oxigraph / Morph-KGC)** | **in progress** |
-| 1 | Starrydata fixed-schema E2E (CSV → RDF → SPARQL → MCP) | not started |
-| 2 | Minimal custom MCP tools | not started |
+| 0.5 | Dependency validation (togopackage / Oxigraph / Morph-KGC) | done |
+| 1 | Starrydata fixed-schema E2E (CSV → RDF → SPARQL → MCP) | done |
+| **2** | **Watcher + upload API (drop CSV → auto reindex)** | **in progress** |
 | 3 | Generic CSV → RDF (schema inference) | not started |
 | 4 | Graphium integration (citation blocks) | not started |
 
-## Quickstart (after Phase 1)
-
-> The commands below are **not yet wired**. They are reproduced from the design plan so contributors know what to expect once Phase 1 lands.
+## Quickstart
 
 ```bash
 git clone https://github.com/kumagallium/csv2rdf-mcp
 cd csv2rdf-mcp
-docker compose up -d
-# Drop a CSV into data/sources/csv/ — the watcher converts and indexes it
-curl 'http://localhost:10005/sparql?query=SELECT%20*%20WHERE%20%7B%20%3Fs%20%3Fp%20%3Fo%20%7D%20LIMIT%2010'
+docker compose up -d --build
+
+# Drop a CSV into the kind-specific directory; the watcher picks it up.
+cp /path/to/starrydata_papers.csv data/sources/csv/papers/
+
+# …or upload via HTTP:
+curl -F file=@papers.csv http://localhost:8080/upload/papers
+
+# Inspect ingest history
+curl http://localhost:8080/jobs | jq
+
+# SPARQL directly against Oxigraph
+curl -G http://localhost:7878/query \
+  --data-urlencode 'query=SELECT (COUNT(*) AS ?c) WHERE { ?s ?p ?o }'
 ```
 
 ## License
