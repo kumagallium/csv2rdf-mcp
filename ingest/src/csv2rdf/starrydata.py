@@ -298,15 +298,25 @@ def _emit_sample(
     sdr: Namespace,
     ingestion_iri: URIRef | None,
 ) -> bool:
-    """1 行 (samples.csv) を Graph に追加。成功で True、sample_id 不在なら False。"""
-    sid_str = row.get("sample_id", "").strip()
-    if not sid_str:
+    """1 行 (samples.csv) を Graph に追加。成功で True、sample_id / SID 不在なら False。
+
+    NOTE: sample_id は starrydata 内でグローバルユニークではない (実測 9,661 件の
+    重複)。Paper SID と組み合わせて初めて一意になるため、複合 IRI を採る:
+        sdr:sample/{SID}-{sample_id}
+    dcterms:identifier も同じ複合キーを literal で持たせ、`sd:rawSampleId` で
+    starrydata 内部の元 sample_id も保持する (CSV と突き合わせ可能にするため)。
+    """
+    sample_id = row.get("sample_id", "").strip()
+    paper_sid = row.get("SID", "").strip()
+    if not sample_id or not paper_sid:
         return False
-    sample = sdr[f"sample/{sid_str}"]
+    sample_key = f"{paper_sid}-{sample_id}"
+    sample = sdr[f"sample/{sample_key}"]
 
     g.add((sample, RDF.type, sd.Sample))
     g.add((sample, RDF.type, PROV.Entity))
-    g.add((sample, DCTERMS.identifier, Literal(sid_str)))
+    g.add((sample, DCTERMS.identifier, Literal(sample_key)))
+    g.add((sample, sd.rawSampleId, Literal(sample_id)))
 
     if ingestion_iri is not None:
         g.add((sample, PROV.wasGeneratedBy, ingestion_iri))
@@ -320,8 +330,7 @@ def _emit_sample(
     if details := strip_quoted(row.get("composition_details", "")):
         g.add((sample, sd.compositionDetails, Literal(details)))
 
-    if paper_sid := row.get("SID", "").strip():
-        g.add((sample, sd.fromPaper, sdr[f"paper/{paper_sid}"]))
+    g.add((sample, sd.fromPaper, sdr[f"paper/{paper_sid}"]))
 
     if created := strip_quoted(row.get("created_at", "")):
         g.add((sample, DCTERMS.created, Literal(created)))
@@ -331,7 +340,7 @@ def _emit_sample(
     for i, (descriptor_name, body) in enumerate(
         parse_sample_info(row.get("sample_info", "")).items()
     ):
-        descriptor = sdr[f"descriptor/{sid_str}/{i}"]
+        descriptor = sdr[f"descriptor/{sample_key}/{i}"]
         g.add((sample, sd.hasDescriptor, descriptor))
         g.add((descriptor, RDF.type, sd.Descriptor))
         g.add((descriptor, sd.descriptorName, Literal(descriptor_name)))
@@ -352,7 +361,13 @@ def _emit_curve(
     sdr: Namespace,
     ingestion_iri: URIRef | None,
 ) -> bool:
-    """1 行 (curves.csv) を Graph に追加。図毎にユニークな figure_id をキーにする。
+    """1 行 (curves.csv) を Graph に追加。
+
+    NOTE: starrydata は 1 つの figure (figure_id) に複数 sample の curve を載せる
+    ことがあり、また figure_id 自体も paper を跨いで重複しうる (実測 4,466 件)。
+    そのため curve IRI は (SID, figure_id, sample_id) の複合キーで作る:
+        sdr:curve/{SID}-{figure_id}-{sample_id}
+    starrydata 全件で (SID, figure_id, sample_id) は 100% ユニーク (検証済)。
 
     設計プラン §4「x/y 配列の表現方針」方針 C:
       - sd:xValuesJSON / sd:yValuesJSON で JSON literal 保持 (xsd:string)
@@ -360,13 +375,18 @@ def _emit_curve(
       → 2 次元の局所範囲クエリは集約値だけでは答えられない (既知の限界)
     """
     fig_id = row.get("figure_id", "").strip()
-    if not fig_id:
+    sample_id = row.get("sample_id", "").strip()
+    paper_sid = row.get("SID", "").strip()
+    if not fig_id or not sample_id or not paper_sid:
         return False
-    curve = sdr[f"curve/{fig_id}"]
+    curve_key = f"{paper_sid}-{fig_id}-{sample_id}"
+    curve = sdr[f"curve/{curve_key}"]
+    sample_iri = sdr[f"sample/{paper_sid}-{sample_id}"]
 
     g.add((curve, RDF.type, sd.Curve))
     g.add((curve, RDF.type, PROV.Entity))
-    g.add((curve, DCTERMS.identifier, Literal(fig_id)))
+    g.add((curve, DCTERMS.identifier, Literal(curve_key)))
+    g.add((curve, sd.rawFigureId, Literal(fig_id)))
 
     if ingestion_iri is not None:
         g.add((curve, PROV.wasGeneratedBy, ingestion_iri))
@@ -374,8 +394,7 @@ def _emit_curve(
     if figure_name := strip_quoted(row.get("figure_name", "")):
         g.add((curve, sd.figureName, Literal(figure_name)))
 
-    if sample_id := row.get("sample_id", "").strip():
-        g.add((curve, sd.ofSample, sdr[f"sample/{sample_id}"]))
+    g.add((curve, sd.ofSample, sample_iri))
 
     for col_key, prop in (
         ("prop_x", sd.propertyX),
