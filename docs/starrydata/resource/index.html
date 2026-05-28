@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Starrydata Resource IRIs — csv2rdf-mcp</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; color: #1f2933; max-width: 800px; margin: 0 auto; padding: 2rem 1.25rem; line-height: 1.6; }
+  h1 { border-bottom: 2px solid #4B7A52; padding-bottom: 0.3rem; }
+  code, pre { font-family: "SF Mono", Menlo, Monaco, Consolas, monospace; background: #f3f4f6; padding: 0.1em 0.35em; border-radius: 3px; font-size: 0.92em; }
+  pre { padding: 0.75rem 1rem; overflow-x: auto; }
+  a { color: #4B7A52; }
+</style>
+</head>
+<body>
+
+<h1>Starrydata Resource IRIs</h1>
+
+<p>This is the IRI prefix space for <strong>instances</strong> of Starrydata
+entities (papers, samples, curves, descriptors, periodicals, persons,
+ingestion activities). The full IRI of a single resource has the form:</p>
+
+<pre>https://kumagallium.github.io/csv2rdf-mcp/starrydata/resource/{type}/{id}
+
+# Examples
+https://kumagallium.github.io/csv2rdf-mcp/starrydata/resource/paper/61
+https://kumagallium.github.io/csv2rdf-mcp/starrydata/resource/sample/61-25267
+https://kumagallium.github.io/csv2rdf-mcp/starrydata/resource/curve/61-20485-25275</pre>
+
+<h2>Dereferencing status</h2>
+
+<p><strong>Phase 1: instance IRIs are <em>not</em> dereferenceable</strong>
+(they currently return this page; a direct visit to e.g.
+<code>/resource/paper/61</code> shows 404). The IRIs are identifiers that work
+correctly in SPARQL / RDF semantics; they are not yet HTTP-resolvable.</p>
+
+<p>Phase 2 plans to add a small dynamic service that responds to instance IRI
+requests with a SPARQL <code>DESCRIBE</code> result (Turtle for machines, HTML
+for humans, content-negotiated).</p>
+
+<h2>Where to query the data today</h2>
+
+<ul>
+  <li><strong>Public hosted SPARQL endpoint</strong>: <em>(none yet — Phase 1 deployments are self-hosted on closed servers per the sovereignty-first design)</em></li>
+  <li><strong>Run locally</strong>: <code>docker compose up -d --build</code> on the <a href="https://github.com/kumagallium/csv2rdf-mcp">csv2rdf-mcp</a> repository, then POST a Turtle file to <code>http://localhost:7878/store?default</code></li>
+  <li><strong>Query via MCP</strong>: register the togomcp container in any MCP-aware AI client (Claude Code, Cursor, Dify) — see the <a href="https://github.com/kumagallium/csv2rdf-mcp/blob/main/docs/architecture/crucible-registration.md">Crucible registration recipe</a></li>
+</ul>
+
+<p>For the ontology definitions, see
+<a href="../ontology/"><code>../ontology/</code></a>.</p>
+
+</body>
+</html>

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Starrydata Ontology — csv2rdf-mcp</title>
+<link rel="alternate" type="text/turtle" href="ontology.ttl" />
+<style>
+  :root {
+    --fg: #1f2933;
+    --fg-muted: #52606d;
+    --bg: #ffffff;
+    --accent: #4B7A52;
+    --border: #d1d5db;
+    --code-bg: #f3f4f6;
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; color: var(--fg); background: var(--bg); max-width: 880px; margin: 0 auto; padding: 2rem 1.25rem; line-height: 1.6; }
+  h1 { border-bottom: 2px solid var(--accent); padding-bottom: 0.3rem; }
+  h2 { margin-top: 2rem; color: var(--accent); }
+  code, pre { font-family: "SF Mono", Menlo, Monaco, Consolas, monospace; background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px; font-size: 0.92em; }
+  pre { padding: 0.75rem 1rem; overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 0.75rem 0 1.25rem; }
+  th, td { border: 1px solid var(--border); padding: 0.5rem 0.75rem; text-align: left; vertical-align: top; }
+  th { background: #f8f9fa; }
+  a { color: var(--accent); }
+  .badge { display: inline-block; padding: 0.15em 0.5em; border-radius: 3px; background: #edf5ee; color: var(--accent); font-size: 0.85em; font-weight: 600; }
+  .anchor { color: var(--fg-muted); font-size: 0.85em; margin-left: 0.5em; text-decoration: none; }
+  .anchor:hover { color: var(--accent); }
+  .small { color: var(--fg-muted); font-size: 0.9em; }
+</style>
+</head>
+<body>
+
+<h1>Starrydata Ontology</h1>
+
+<p>
+<span class="badge">Phase 1</span>
+<span class="badge">Apache-2.0</span>
+<span class="badge">RDFS / OWL TBox</span>
+</p>
+
+<p>
+This namespace defines classes and properties used by the
+<a href="https://github.com/kumagallium/csv2rdf-mcp"><code>csv2rdf-mcp</code></a>
+project to represent the <a href="https://www.starrydata2.org/">Starrydata</a>
+dataset (digitised measurement curves from thermoelectric, battery, and magnetic
+materials publications) as a provenance-rich knowledge graph.
+</p>
+
+<h2>Downloads</h2>
+<table>
+  <tr><th>Format</th><th>Link</th><th>Note</th></tr>
+  <tr><td>Turtle (RDFS/OWL TBox)</td><td><a href="ontology.ttl"><code>ontology.ttl</code></a></td><td>153 triples, en/ja labels</td></tr>
+  <tr><td>WebVOWL (interactive)</td><td><a href="https://service.tib.eu/webvowl/">Upload <code>ontology.ttl</code> to TIB WebVOWL</a></td><td>Interactive ontology visualisation</td></tr>
+  <tr><td>Mermaid class diagram</td><td><a href="https://github.com/kumagallium/csv2rdf-mcp/blob/main/docs/ontology/diagram.md">GitHub renders it</a></td><td>Quick visual overview</td></tr>
+</table>
+
+<h2>Classes</h2>
+<table>
+  <thead>
+    <tr><th>IRI fragment</th><th>Label</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td id="Paper"><code>#Paper</code> <a class="anchor" href="#Paper">¶</a></td><td>Paper</td><td>A scholarly article that contains digitised measurement data. Subclass of <code>schema:ScholarlyArticle</code> and <code>prov:Entity</code>.</td></tr>
+    <tr><td id="Sample"><code>#Sample</code> <a class="anchor" href="#Sample">¶</a></td><td>Sample</td><td>A physical specimen prepared and measured in a paper. Subclass of <code>prov:Entity</code>.</td></tr>
+    <tr><td id="Curve"><code>#Curve</code> <a class="anchor" href="#Curve">¶</a></td><td>Curve</td><td>A measurement curve digitised from a figure in the source paper. Subclass of <code>prov:Entity</code>. Phase 1 stores raw <code>x</code>/<code>y</code> arrays as JSON literals plus pre-computed aggregates (xMin/xMax/yMin/yMax/pointCount).</td></tr>
+    <tr><td id="Descriptor"><code>#Descriptor</code> <a class="anchor" href="#Descriptor">¶</a></td><td>Descriptor</td><td>Structured metadata extracted from the <code>sample_info</code> column (MaterialFamily, Form, FabricationProcess, etc.).</td></tr>
+    <tr><td id="IngestionActivity"><code>#IngestionActivity</code> <a class="anchor" href="#IngestionActivity">¶</a></td><td>Ingestion Activity</td><td>A single run of the csv2rdf-mcp ingester. Subclass of <code>prov:Activity</code>. Each Paper / Sample / Curve generated in the run carries <code>prov:wasGeneratedBy → IngestionActivity</code>.</td></tr>
+  </tbody>
+</table>
+
+<h2>Selected properties</h2>
+<table>
+  <thead>
+    <tr><th>IRI fragment</th><th>Type</th><th>Domain → Range</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>#fromPaper</code></td><td>ObjectProperty</td><td>Sample → Paper</td></tr>
+    <tr><td><code>#ofSample</code></td><td>ObjectProperty</td><td>Curve → Sample</td></tr>
+    <tr><td><code>#hasDescriptor</code></td><td>ObjectProperty</td><td>Sample → Descriptor</td></tr>
+    <tr><td><code>#compositionString</code></td><td>DatatypeProperty</td><td>Sample → xsd:string</td></tr>
+    <tr><td><code>#propertyX</code> / <code>#propertyY</code></td><td>DatatypeProperty</td><td>Curve → xsd:string (Phase 2: <code>qudt:QuantityKind</code> IRI)</td></tr>
+    <tr><td><code>#xValuesJSON</code> / <code>#yValuesJSON</code></td><td>DatatypeProperty</td><td>Curve → xsd:string (raw JSON array)</td></tr>
+    <tr><td><code>#xMin</code> / <code>#xMax</code> / <code>#yMin</code> / <code>#yMax</code></td><td>DatatypeProperty</td><td>Curve → xsd:double</td></tr>
+    <tr><td><code>#pointCount</code></td><td>DatatypeProperty</td><td>Curve → xsd:integer</td></tr>
+    <tr><td><code>#rawSampleId</code> / <code>#rawFigureId</code></td><td>DatatypeProperty</td><td>Sample / Curve → xsd:string (raw upstream id, <strong>not unique across papers</strong>)</td></tr>
+  </tbody>
+</table>
+
+<p class="small">
+Complete definitions — with <code>rdfs:label</code> / <code>rdfs:comment</code> in
+en and ja — are in <a href="ontology.ttl"><code>ontology.ttl</code></a>. The
+formal shape grammar (ShEx) is shipped alongside the data in
+<a href="https://github.com/kumagallium/csv2rdf-mcp/blob/main/data/togomcp/mie/starrydata.yaml"><code>data/togomcp/mie/starrydata.yaml</code></a>.
+</p>
+
+<h2>IRI design</h2>
+
+<p>The prefix <code>sd:</code> resolves to this page; instance IRIs use the
+<code>sdr:</code> prefix (<code>../resource/</code>). Phase 1 mints instance
+IRIs as composite keys so that the raw <code>sample_id</code> / <code>figure_id</code>
+columns of Starrydata — which are <strong>not globally unique</strong> (collide
+across papers) — never collapse separate measurements into a single resource:</p>
+
+<pre>sd:   https://kumagallium.github.io/csv2rdf-mcp/starrydata/ontology#
+sdr:  https://kumagallium.github.io/csv2rdf-mcp/starrydata/resource/
+
+sdr:paper/{SID}
+sdr:sample/{SID}-{sample_id}
+sdr:curve/{SID}-{figure_id}-{sample_id}
+sdr:descriptor/{SID}-{sample_id}/{idx}
+sdr:periodical/{slug-of-journal-name}
+sdr:person/{SID}/{author-idx}
+sdr:ingestion/run-{timestamp}</pre>
+
+<p>Phase 2 will redirect <code>https://w3id.org/csv2rdf/...</code> here so the
+IRI strings can survive future host migrations.</p>
+
+<h2>Phase 1 vs Phase 2+</h2>
+<table>
+  <thead><tr><th>Feature</th><th>Phase 1 (now)</th><th>Phase 2+</th></tr></thead>
+  <tbody>
+    <tr><td>Class / property definitions</td><td>5 classes, 19+ properties (this page)</td><td>QUDT alignment, EMMO/MatOnto subclassOf</td></tr>
+    <tr><td>Instance dereference (<code>sdr:paper/61</code> etc.)</td><td><em>not dereferenceable</em> (404)</td><td>Dynamic service returning SPARQL DESCRIBE result</td></tr>
+    <tr><td>Unit / quantity normalisation</td><td>Raw string (<code>"Seebeck coefficient"</code>)</td><td><code>qudt:SeebeckCoefficient</code> IRI</td></tr>
+    <tr><td>Provenance of digitisation</td><td>Ingest activity only</td><td>+ <code>sd:DigitizationActivity</code> with WebPlotDigitizer attribution</td></tr>
+    <tr><td>Curve data model</td><td>JSON literal + aggregates</td><td>Individual <code>sd:DataPoint</code> nodes for 2-D range queries</td></tr>
+  </tbody>
+</table>
+
+<h2>Citing</h2>
+<p>
+If you use this ontology, please cite the Starrydata project (see
+<a href="https://github.com/kumagallium/csv2rdf-mcp">repository README</a>
+for the current citation form). This page is part of
+<code>csv2rdf-mcp</code>, Apache-2.0.
+</p>
+
+<p class="small">Last updated: see
+<a href="https://github.com/kumagallium/csv2rdf-mcp/commits/main/docs/starrydata/ontology">git history</a>.
+For issues or contributions, file at
+<a href="https://github.com/kumagallium/csv2rdf-mcp/issues">github.com/kumagallium/csv2rdf-mcp/issues</a>.</p>
+
+</body>
+</html>
