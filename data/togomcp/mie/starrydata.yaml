@@ -129,7 +129,8 @@ shape_expressions: |
 
   <SampleShape> {
     a [ sd:Sample prov:Entity ] ;
-    dcterms:identifier xsd:string ;
+    dcterms:identifier xsd:string ;            # 複合キー: {SID}-{sample_id}
+    sd:rawSampleId xsd:string ;                # starrydata 内部の元 sample_id
     schema:name xsd:string ? ;
     sd:compositionString xsd:string ? ;
     sd:compositionDetails xsd:string ? ;
@@ -150,7 +151,8 @@ shape_expressions: |
 
   <CurveShape> {
     a [ sd:Curve prov:Entity ] ;
-    dcterms:identifier xsd:string ;
+    dcterms:identifier xsd:string ;            # 複合キー: {SID}-{figure_id}-{sample_id}
+    sd:rawFigureId xsd:string ;                # starrydata 内部の元 figure_id
     sd:figureName xsd:string ? ;
     sd:ofSample @<SampleShape> ? ;
     sd:propertyX xsd:string ? ;
@@ -198,21 +200,23 @@ sample_rdf_entries:
           schema:identifier "10.1021/am405410e" ;
           schema:name "Some Thermoelectric Paper" .
 
-      sdr:sample/113 a sd:Sample, prov:Entity ;
-          dcterms:identifier "113" ;
+      sdr:sample/6-113 a sd:Sample, prov:Entity ;
+          dcterms:identifier "6-113" ;       # 複合キー {SID}-{sample_id}
+          sd:rawSampleId "113" ;              # starrydata 内部の元 sample_id
           schema:name "Pb1.00025Zn0.02Te1.02I0.0005" ;
           sd:compositionString "Pb1.00025Zn0.02Te1.02I0.0005" ;
           sd:fromPaper sdr:paper/6 ;
-          sd:hasDescriptor sdr:descriptor/113/0 .
+          sd:hasDescriptor sdr:descriptor/6-113/0 .
 
-      sdr:descriptor/113/0 a sd:Descriptor ;
+      sdr:descriptor/6-113/0 a sd:Descriptor ;
           sd:descriptorName "MaterialFamily" ;
           sd:descriptorCategory "PbTe" .
 
-      sdr:curve/79 a sd:Curve, prov:Entity ;
-          dcterms:identifier "79" ;
+      sdr:curve/6-79-113 a sd:Curve, prov:Entity ;
+          dcterms:identifier "6-79-113" ;     # 複合キー {SID}-{figure_id}-{sample_id}
+          sd:rawFigureId "79" ;                # starrydata 内部の元 figure_id
           sd:figureName "6(b)" ;
-          sd:ofSample sdr:sample/113 ;
+          sd:ofSample sdr:sample/6-113 ;
           sd:propertyX "Temperature" ; sd:propertyY "Seebeck coefficient" ;
           sd:unitXString "K" ; sd:unitYString "V*K^(-1)" ;
           sd:xValuesJSON "[299.86,324.87,...,650.02]" ;
@@ -314,6 +318,16 @@ architectural_notes: |
   - **IRI naming**: No blank nodes anywhere. Periodical, Author, Sample,
     Descriptor, Curve, and IngestionActivity all have stable IRIs. This makes
     re-ingest idempotent under SPARQL set semantics.
+  - **Composite IRI keys (Phase 1 bug fix)**: starrydata's raw `sample_id` is
+    not globally unique (9,661 collisions across papers) and `figure_id` is
+    also reused across papers (4,466 collisions). The ingester therefore uses
+    **composite keys** to avoid silently collapsing distinct measurements
+    into a single IRI:
+      - `sdr:sample/{SID}-{sample_id}`
+      - `sdr:curve/{SID}-{figure_id}-{sample_id}`
+      - `sdr:descriptor/{SID}-{sample_id}/{idx}`
+    The original `sample_id` / `figure_id` is preserved as `sd:rawSampleId` /
+    `sd:rawFigureId` for cross-referencing with the upstream CSVs.
   - **PROV-O**: Each ingest run mints one `sd:IngestionActivity` per CSV file
     (papers / samples / curves run separately, so 3 activities exist after a
     full load). Each generated entity has `prov:wasGeneratedBy` pointing at its
@@ -347,6 +361,10 @@ anti_patterns: |
   - DescriptorShape entries with empty category / comment / extracted are
     DROPPED at ingest time (starrydata's CSV contains many blank descriptor
     templates). Do not expect every descriptor name to appear in the graph.
+  - Do NOT use `sd:rawSampleId` / `sd:rawFigureId` as the lookup key — those
+    values are reused across papers. Always join Sample/Curve via their
+    composite IRI (`sdr:sample/{SID}-{sample_id}` etc.) or via the
+    `sd:fromPaper` / `sd:ofSample` object property.
 
 common_errors: |
   - **SP030 "Too many closing parentheses"** — only observed with the

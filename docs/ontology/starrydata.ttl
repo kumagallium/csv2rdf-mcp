@@ -208,3 +208,24 @@ sd:projectName
     rdfs:label "project name"@en, "プロジェクト名"@ja ;
     rdfs:comment "starrydata curator が割り当てるタグ (\"ThermoelectricMaterials\", \"GeneralDB\" 等)。Paper と Curve の両方に付くことがある。"@ja ;
     rdfs:range xsd:string .
+
+# ----------------------------------------------------------------------------
+# Raw starrydata identifiers (cross-reference with upstream CSV)
+# ----------------------------------------------------------------------------
+# Phase 1 で発覚した bug: starrydata の sample_id / figure_id は globally unique
+# ではないため、IRI には複合キー ({SID}-{sample_id}, {SID}-{figure_id}-{sample_id})
+# を使う。元の id を SPARQL から検索できるよう以下のプロパティで残す。
+
+sd:rawSampleId
+    a owl:DatatypeProperty ;
+    rdfs:label "raw sample_id"@en, "元の sample_id"@ja ;
+    rdfs:comment "starrydata_samples.csv の sample_id 列の値そのまま (paper を跨ぐと collide する可能性があるので lookup には使わないこと)"@ja ;
+    rdfs:domain sd:Sample ;
+    rdfs:range xsd:string .
+
+sd:rawFigureId
+    a owl:DatatypeProperty ;
+    rdfs:label "raw figure_id"@en, "元の figure_id"@ja ;
+    rdfs:comment "starrydata_curves.csv の figure_id 列の値そのまま (paper を跨ぐと collide する可能性があるので lookup には使わないこと)"@ja ;
+    rdfs:domain sd:Curve ;
+    rdfs:range xsd:string .
