@@ -33,7 +33,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -299,34 +298,31 @@ async def watch(
     stop = stop_event or asyncio.Event()
 
     if events_source is None:
+        # ``watchfiles.awatch`` already debounces: it waits for the change
+        # stream to go quiet before yielding a batch, so by the time we see
+        # a path it's typically settled. The per-file ``_settle`` call below
+        # is the belt-and-suspenders check for slow ``cp`` of large CSVs.
+        debounce_ms = max(50, int(config.settle_s * 1000))
         watch_dirs = [str(config.drop_root / k) for k in KINDS]
-        events_source = awatch(*watch_dirs, stop_event=stop)
-
-    pending: dict[Path, float] = {}
+        events_source = awatch(
+            *watch_dirs, stop_event=stop, debounce=debounce_ms
+        )
 
     async for batch in events_source:
+        # Dedupe within a single batch: one upload typically yields multiple
+        # events (added .tmp / removed .tmp / added .csv) for the same path.
+        ready: dict[Path, str] = {}
         for change_type, raw_path in batch:
             if change_type == Change.deleted:
                 continue
             path = Path(raw_path)
-            if _classify(path, config.drop_root) is None:
-                continue
-            pending[path] = time.monotonic()
-
-        # Drain ready files. We sleep enough to satisfy each entry's settle
-        # window, then ingest sequentially.
-        ready: list[Path] = []
-        now = time.monotonic()
-        for path, queued_at in list(pending.items()):
-            if now - queued_at >= config.settle_s:
-                ready.append(path)
-                del pending[path]
-
-        for path in ready:
             kind = _classify(path, config.drop_root)
             if kind is None:
                 continue
-            if not await _settle(path, config.settle_s):
+            ready[path] = kind
+
+        for path, kind in ready.items():
+            if not await _settle(path, max(0.05, config.settle_s)):
                 logger.info("watcher: file disappeared before settle: %s", path)
                 continue
             logger.info("watcher: processing %s (kind=%s)", path, kind)
