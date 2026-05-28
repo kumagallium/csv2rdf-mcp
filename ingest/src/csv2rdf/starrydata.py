@@ -20,9 +20,9 @@ import csv
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import IO, Iterator, TextIO
+from typing import TextIO
 
 from rdflib import Graph, Literal, Namespace, URIRef
 from rdflib.namespace import DCTERMS, PROV, RDF, XSD
@@ -50,7 +50,7 @@ class IngestStats:
     rows_ok: int = 0
     rows_err: int = 0
     triples_out: int = 0
-    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     ended_at: datetime | None = None
 
 
@@ -143,6 +143,65 @@ def parse_project_names(raw: str) -> list[str]:
     return [str(x).strip() for x in data if str(x).strip()]
 
 
+def parse_sample_info(raw: str) -> dict[str, dict[str, str]]:
+    """sample_info カラム (深くネストした JSON object) を緩くパース。
+
+    形式: { descriptorName: { "category": str?, "comment": str?, "extracted": str? } }
+    全フィールド空のエントリは捨てる (S/N 比のため)。
+    """
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for name, value in data.items():
+        if not isinstance(value, dict):
+            continue
+        category = str(value.get("category", "")).strip()
+        comment = str(value.get("comment", "")).strip()
+        extracted = str(value.get("extracted", "")).strip()
+        if not (category or comment or extracted):
+            continue  # 全部空のエントリは出さない (starrydata のテンプレ残骸)
+        out[name.strip()] = {
+            "category": category,
+            "comment": comment,
+            "extracted": extracted,
+        }
+    return out
+
+
+def parse_float_array(raw: str) -> list[float]:
+    """curves.csv の x / y JSON 配列を Python list[float] にパース。
+
+    失敗した個別要素は除外し (NaN / None / 非数値文字列など)、配列自体が壊れていれば
+    空リストを返す。
+    """
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    out: list[float] = []
+    for v in data:
+        try:
+            if v is None:
+                continue
+            fv = float(v)
+            if fv != fv:  # NaN check
+                continue
+            out.append(fv)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def strip_quoted(value: str) -> str:
     v = value.strip()
     if len(v) >= 2 and v[0] == v[-1] == '"':
@@ -232,6 +291,132 @@ def _emit_paper(
     return True
 
 
+def _emit_sample(
+    g: Graph,
+    row: dict[str, str],
+    sd: Namespace,
+    sdr: Namespace,
+    ingestion_iri: URIRef | None,
+) -> bool:
+    """1 行 (samples.csv) を Graph に追加。成功で True、sample_id 不在なら False。"""
+    sid_str = row.get("sample_id", "").strip()
+    if not sid_str:
+        return False
+    sample = sdr[f"sample/{sid_str}"]
+
+    g.add((sample, RDF.type, sd.Sample))
+    g.add((sample, RDF.type, PROV.Entity))
+    g.add((sample, DCTERMS.identifier, Literal(sid_str)))
+
+    if ingestion_iri is not None:
+        g.add((sample, PROV.wasGeneratedBy, ingestion_iri))
+
+    if name := strip_quoted(row.get("sample_name", "")):
+        g.add((sample, SCHEMA.name, Literal(name)))
+
+    if composition := strip_quoted(row.get("composition", "")):
+        g.add((sample, sd.compositionString, Literal(composition)))
+
+    if details := strip_quoted(row.get("composition_details", "")):
+        g.add((sample, sd.compositionDetails, Literal(details)))
+
+    if paper_sid := row.get("SID", "").strip():
+        g.add((sample, sd.fromPaper, sdr[f"paper/{paper_sid}"]))
+
+    if created := strip_quoted(row.get("created_at", "")):
+        g.add((sample, DCTERMS.created, Literal(created)))
+    if updated := strip_quoted(row.get("updated_at", "")):
+        g.add((sample, DCTERMS.modified, Literal(updated)))
+
+    for i, (descriptor_name, body) in enumerate(
+        parse_sample_info(row.get("sample_info", "")).items()
+    ):
+        descriptor = sdr[f"descriptor/{sid_str}/{i}"]
+        g.add((sample, sd.hasDescriptor, descriptor))
+        g.add((descriptor, RDF.type, sd.Descriptor))
+        g.add((descriptor, sd.descriptorName, Literal(descriptor_name)))
+        if body["category"]:
+            g.add((descriptor, sd.descriptorCategory, Literal(body["category"])))
+        if body["comment"]:
+            g.add((descriptor, sd.descriptorComment, Literal(body["comment"])))
+        if body["extracted"]:
+            g.add((descriptor, sd.descriptorExtracted, Literal(body["extracted"])))
+
+    return True
+
+
+def _emit_curve(
+    g: Graph,
+    row: dict[str, str],
+    sd: Namespace,
+    sdr: Namespace,
+    ingestion_iri: URIRef | None,
+) -> bool:
+    """1 行 (curves.csv) を Graph に追加。図毎にユニークな figure_id をキーにする。
+
+    設計プラン §4「x/y 配列の表現方針」方針 C:
+      - sd:xValuesJSON / sd:yValuesJSON で JSON literal 保持 (xsd:string)
+      - sd:xMin / sd:xMax / sd:yMin / sd:yMax / sd:pointCount を集約値として出す
+      → 2 次元の局所範囲クエリは集約値だけでは答えられない (既知の限界)
+    """
+    fig_id = row.get("figure_id", "").strip()
+    if not fig_id:
+        return False
+    curve = sdr[f"curve/{fig_id}"]
+
+    g.add((curve, RDF.type, sd.Curve))
+    g.add((curve, RDF.type, PROV.Entity))
+    g.add((curve, DCTERMS.identifier, Literal(fig_id)))
+
+    if ingestion_iri is not None:
+        g.add((curve, PROV.wasGeneratedBy, ingestion_iri))
+
+    if figure_name := strip_quoted(row.get("figure_name", "")):
+        g.add((curve, sd.figureName, Literal(figure_name)))
+
+    if sample_id := row.get("sample_id", "").strip():
+        g.add((curve, sd.ofSample, sdr[f"sample/{sample_id}"]))
+
+    for col_key, prop in (
+        ("prop_x", sd.propertyX),
+        ("prop_y", sd.propertyY),
+        ("unit_x", sd.unitXString),  # Phase 1 では QUDT マッピングせず raw 保持
+        ("unit_y", sd.unitYString),
+        ("comments", sd.comments),
+    ):
+        if value := strip_quoted(row.get(col_key, "")):
+            g.add((curve, prop, Literal(value)))
+
+    # x / y 配列: JSON literal + 集約値
+    x_raw = row.get("x", "")
+    y_raw = row.get("y", "")
+    xs = parse_float_array(x_raw)
+    ys = parse_float_array(y_raw)
+    if x_raw:
+        g.add((curve, sd.xValuesJSON, Literal(x_raw)))
+    if y_raw:
+        g.add((curve, sd.yValuesJSON, Literal(y_raw)))
+    if xs:
+        g.add((curve, sd.xMin, Literal(min(xs), datatype=XSD.double)))
+        g.add((curve, sd.xMax, Literal(max(xs), datatype=XSD.double)))
+    if ys:
+        g.add((curve, sd.yMin, Literal(min(ys), datatype=XSD.double)))
+        g.add((curve, sd.yMax, Literal(max(ys), datatype=XSD.double)))
+    point_count = min(len(xs), len(ys))
+    if point_count:
+        g.add((curve, sd.pointCount, Literal(point_count, datatype=XSD.integer)))
+
+    for project in parse_project_names(row.get("project_names", "")):
+        g.add((curve, sd.projectName, Literal(project)))
+
+    if created := strip_quoted(row.get("created_at", "")):
+        g.add((curve, DCTERMS.created, Literal(created)))
+    if updated := strip_quoted(row.get("updated_at", "")):
+        g.add((curve, DCTERMS.modified, Literal(updated)))
+
+    return True
+
+
 def _emit_ingestion_activity(
     g: Graph,
     sd: Namespace,
@@ -296,7 +481,7 @@ def ingest_papers(
     stats = IngestStats()
     err_fh: TextIO | None = None
     if error_log_path is not None:
-        err_fh = Path(error_log_path).open("w", encoding="utf-8")
+        err_fh = Path(error_log_path).open("w", encoding="utf-8")  # noqa: SIM115 (closed in finally)
 
     ingestion_iri: URIRef | None = None
     if cfg.emit_prov:
@@ -306,14 +491,14 @@ def ingest_papers(
         )
 
     try:
-        with csv_path.open(encoding="utf-8", newline="") as fi:
+        with csv_path.open(encoding="utf-8-sig", newline="") as fi:
             reader = csv.DictReader(fi)
             for row in reader:
                 stats.rows_in += 1
                 try:
                     if _emit_paper(g, row, sd, sdr, ingestion_iri):
                         stats.rows_ok += 1
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     stats.rows_err += 1
                     if err_fh is not None:
                         err_fh.write(
@@ -332,7 +517,7 @@ def ingest_papers(
             err_fh.close()
 
     if ingestion_iri is not None:
-        stats.ended_at = datetime.now(timezone.utc)
+        stats.ended_at = datetime.now(UTC)
         g.add(
             (
                 ingestion_iri,
@@ -341,7 +526,120 @@ def ingest_papers(
             )
         )
     else:
-        stats.ended_at = datetime.now(timezone.utc)
+        stats.ended_at = datetime.now(UTC)
+
+    g.serialize(destination=str(out_path), format="turtle")
+    stats.triples_out = len(g)
+    return stats
+
+
+def ingest_samples(
+    csv_path: Path | str,
+    out_path: Path | str,
+    config: IngestConfig | None = None,
+    error_log_path: Path | str | None = None,
+) -> IngestStats:
+    """Convert samples.csv to a Turtle file at `out_path`."""
+    return _ingest_generic(
+        csv_path,
+        out_path,
+        config,
+        error_log_path,
+        emit_row=_emit_sample,
+    )
+
+
+def ingest_curves(
+    csv_path: Path | str,
+    out_path: Path | str,
+    config: IngestConfig | None = None,
+    error_log_path: Path | str | None = None,
+) -> IngestStats:
+    """Convert curves.csv to a Turtle file at `out_path`."""
+    return _ingest_generic(
+        csv_path,
+        out_path,
+        config,
+        error_log_path,
+        emit_row=_emit_curve,
+    )
+
+
+def _ingest_generic(
+    csv_path: Path | str,
+    out_path: Path | str,
+    config: IngestConfig | None,
+    error_log_path: Path | str | None,
+    emit_row,
+) -> IngestStats:
+    """ingest_papers / samples / curves 共通の I/O ハーネス。
+
+    emit_row(g, row, sd, sdr, ingestion_iri) -> bool で 1 行を処理し、True/False を返す。
+    """
+    cfg = config or IngestConfig()
+    csv_path = Path(csv_path)
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    sd = Namespace(cfg.ontology_iri)
+    sdr = Namespace(cfg.resource_iri)
+
+    g = Graph()
+    g.bind("sd", sd)
+    g.bind("sdr", sdr)
+    g.bind("schema", SCHEMA)
+    g.bind("dcterms", DCTERMS)
+    g.bind("bibo", BIBO)
+    g.bind("prov", PROV)
+
+    stats = IngestStats()
+    err_fh: TextIO | None = None
+    if error_log_path is not None:
+        err_fh = Path(error_log_path).open("w", encoding="utf-8")  # noqa: SIM115 (closed in finally)
+
+    ingestion_iri: URIRef | None = None
+    if cfg.emit_prov:
+        run_id = "run-" + stats.started_at.strftime("%Y%m%dT%H%M%SZ")
+        ingestion_iri = _emit_ingestion_activity(
+            g, sd, sdr, csv_path, run_id, stats.started_at, cfg.software_agent_iri
+        )
+
+    try:
+        # NOTE: starrydata の curves.csv / samples.csv は UTF-8 BOM 付き。
+        # utf-8-sig で開けば BOM を黙って剥がし、DictReader が "SID" を見るようになる。
+        with csv_path.open(encoding="utf-8-sig", newline="") as fi:
+            reader = csv.DictReader(fi)
+            for row in reader:
+                stats.rows_in += 1
+                try:
+                    if emit_row(g, row, sd, sdr, ingestion_iri):
+                        stats.rows_ok += 1
+                except Exception as exc:
+                    stats.rows_err += 1
+                    if err_fh is not None:
+                        err_fh.write(
+                            json.dumps(
+                                {
+                                    "row": stats.rows_in,
+                                    "error": repr(exc),
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
+    finally:
+        if err_fh is not None:
+            err_fh.close()
+
+    stats.ended_at = datetime.now(UTC)
+    if ingestion_iri is not None:
+        g.add(
+            (
+                ingestion_iri,
+                PROV.endedAtTime,
+                Literal(stats.ended_at.isoformat(), datatype=XSD.dateTime),
+            )
+        )
 
     g.serialize(destination=str(out_path), format="turtle")
     stats.triples_out = len(g)
@@ -353,44 +651,58 @@ def ingest_papers(
 # ----------------------------------------------------------------------------
 
 
-def _main(argv: list[str] | None = None) -> int:
+_INGESTERS = {
+    "papers": ingest_papers,
+    "samples": ingest_samples,
+    "curves": ingest_curves,
+}
+
+
+def _make_arg_parser(kind: str):
     import argparse
-    import sys
 
     p = argparse.ArgumentParser(
-        prog="csv2rdf-starrydata-papers",
-        description="Ingest starrydata papers.csv into a Turtle file.",
+        prog=f"csv2rdf-starrydata-{kind}",
+        description=f"Ingest starrydata {kind}.csv into a Turtle file.",
     )
-    p.add_argument("csv", type=Path, help="Path to starrydata_papers.csv")
+    p.add_argument("csv", type=Path, help=f"Path to starrydata_{kind}.csv")
     p.add_argument("ttl", type=Path, help="Destination Turtle file")
-    p.add_argument(
-        "--ontology", default=DEFAULT_ONTOLOGY, help="Override ontology namespace IRI"
-    )
-    p.add_argument(
-        "--resource", default=DEFAULT_RESOURCE, help="Override resource namespace IRI"
-    )
-    p.add_argument(
-        "--no-prov",
-        action="store_true",
-        help="Skip emitting sd:IngestionActivity (for tests)",
-    )
-    p.add_argument(
-        "--errors", type=Path, default=None, help="Optional jsonl path for failed rows"
-    )
-    args = p.parse_args(argv)
+    p.add_argument("--ontology", default=DEFAULT_ONTOLOGY)
+    p.add_argument("--resource", default=DEFAULT_RESOURCE)
+    p.add_argument("--no-prov", action="store_true")
+    p.add_argument("--errors", type=Path, default=None)
+    return p
 
+
+def _run(kind: str, argv: list[str] | None = None) -> int:
+    import sys
+
+    args = _make_arg_parser(kind).parse_args(argv)
     cfg = IngestConfig(
         ontology_iri=args.ontology,
         resource_iri=args.resource,
         emit_prov=not args.no_prov,
     )
-    stats = ingest_papers(args.csv, args.ttl, cfg, error_log_path=args.errors)
+    stats = _INGESTERS[kind](args.csv, args.ttl, cfg, error_log_path=args.errors)
     print(
         f"in={stats.rows_in} ok={stats.rows_ok} err={stats.rows_err} "
         f"triples={stats.triples_out} -> {args.ttl}",
         file=sys.stderr,
     )
     return 0 if stats.rows_err == 0 else 1
+
+
+def _main(argv: list[str] | None = None) -> int:
+    """Default entry point: papers (for backward compat with Phase 1 PR #2)."""
+    return _run("papers", argv)
+
+
+def _main_samples(argv: list[str] | None = None) -> int:
+    return _run("samples", argv)
+
+
+def _main_curves(argv: list[str] | None = None) -> int:
+    return _run("curves", argv)
 
 
 if __name__ == "__main__":

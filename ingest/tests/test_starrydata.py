@@ -9,14 +9,11 @@
 from __future__ import annotations
 
 import csv
-import io
-import json
-from datetime import date
 from pathlib import Path
 
 import pytest
 from rdflib import BNode, Graph, Literal, Namespace, URIRef
-from rdflib.namespace import DCTERMS, PROV, RDF, XSD
+from rdflib.namespace import PROV, RDF, XSD
 
 from csv2rdf.starrydata import (
     DEFAULT_ONTOLOGY,

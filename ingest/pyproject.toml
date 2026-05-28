@@ -18,6 +18,8 @@ dev = [
 
 [project.scripts]
 csv2rdf-starrydata-papers = "csv2rdf.starrydata:_main"
+csv2rdf-starrydata-samples = "csv2rdf.starrydata:_main_samples"
+csv2rdf-starrydata-curves = "csv2rdf.starrydata:_main_curves"
 
 [build-system]
 requires = ["hatchling"]
