@@ -21,15 +21,23 @@ anthropic = [
     # stays installable in minimal CI.
     "anthropic>=0.40",
 ]
+validate = [
+    # validate_schema parses TBox TTLs (rdflib) and MIE YAMLs (PyYAML).
+    "rdflib>=7.0",
+    "PyYAML>=6.0",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
     "mypy>=1.10",
+    "rdflib>=7.0",
+    "PyYAML>=6.0",
 ]
 
 [project.scripts]
 csv2rdf-inspect = "csv2rdf_step0.inspect:_main"
 csv2rdf-propose = "csv2rdf_step0.propose:_main"
+csv2rdf-validate = "csv2rdf_step0.validate:_main"
 
 [build-system]
 requires = ["hatchling"]

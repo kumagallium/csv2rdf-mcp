@@ -20,6 +20,12 @@ from csv2rdf_step0.propose import (
     SchemaProposal,
     propose_schema,
 )
+from csv2rdf_step0.validate import (
+    SchemaBundle,
+    TrapResult,
+    ValidationReport,
+    validate_schema,
+)
 
 __all__ = [
     "AnthropicLLMClient",
@@ -27,9 +33,13 @@ __all__ = [
     "ColumnSummary",
     "ForeignKeyCandidate",
     "LLMClient",
+    "SchemaBundle",
     "SchemaProposal",
+    "TrapResult",
     "UniquenessReport",
+    "ValidationReport",
     "inspect_csv",
     "inspect_csv_set",
     "propose_schema",
+    "validate_schema",
 ]
