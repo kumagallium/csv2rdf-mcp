@@ -20,6 +20,10 @@ from csv2rdf_step0.propose import (
     SchemaProposal,
     propose_schema,
 )
+from csv2rdf_step0.refine import (
+    RefinementResult,
+    refine_schema,
+)
 from csv2rdf_step0.validate import (
     SchemaBundle,
     TrapResult,
@@ -33,6 +37,7 @@ __all__ = [
     "ColumnSummary",
     "ForeignKeyCandidate",
     "LLMClient",
+    "RefinementResult",
     "SchemaBundle",
     "SchemaProposal",
     "TrapResult",
@@ -41,5 +46,6 @@ __all__ = [
     "inspect_csv",
     "inspect_csv_set",
     "propose_schema",
+    "refine_schema",
     "validate_schema",
 ]
