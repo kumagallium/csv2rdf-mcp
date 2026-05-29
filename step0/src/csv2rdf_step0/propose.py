@@ -175,6 +175,9 @@ class LLMClient(Protocol):
         - Use ``model="claude-opus-4-7"`` + ``thinking={"type": "adaptive"}``
           + ``output_config={"effort": "xhigh"}`` per claude-api skill guidance.
         - NOT pass ``temperature`` / ``top_p`` / ``top_k`` (removed on Opus 4.7).
+        - **Stream** the response with a generous ``max_tokens`` — a full
+          schema proposal is long and a non-streaming request would either
+          truncate (small cap) or hit the SDK's ~10-minute timeout (large cap).
         - Return ONLY the assistant's text content (concatenate text blocks if
           multiple, drop thinking blocks).
         """
@@ -193,22 +196,29 @@ class AnthropicLLMClient:
 
     Args:
         model: model ID (default ``claude-opus-4-7``).
-        max_tokens: output cap (default 16000 — propose_schema outputs are
-            usually 3-8k tokens but we leave headroom).
+        max_tokens: output cap. Default 32000 — a full 8-section proposal on
+            a real dataset (Mermaid + rdf-config model.yaml + MIE extras +
+            ingester) runs 6-15k tokens; 16000 truncated the MIE section in
+            dogfooding. We **stream** the response so a large cap does not
+            risk the SDK's ~10-minute non-streaming HTTP timeout (the SDK
+            refuses non-streaming requests above ~16k anyway).
         effort: ``output_config.effort`` value. ``xhigh`` is recommended
             for coding/agentic per Opus 4.7 guidance; lower to ``high`` or
             ``medium`` for cost-sensitive workloads.
     """
 
     model: str = "claude-opus-4-7"
-    max_tokens: int = 16000
+    max_tokens: int = 32000
     effort: str = "xhigh"
 
     def complete(self, system_prompt: str, user_message: str) -> str:
         import anthropic
 
         client = anthropic.Anthropic()
-        response = client.messages.create(
+        # Stream so large proposals complete without hitting the SDK's
+        # non-streaming timeout guard. get_final_message() reassembles the
+        # whole response for us.
+        with client.messages.stream(
             model=self.model,
             max_tokens=self.max_tokens,
             thinking={"type": "adaptive"},
@@ -221,9 +231,10 @@ class AnthropicLLMClient:
                 }
             ],
             messages=[{"role": "user", "content": user_message}],
-        )
+        ) as stream:
+            message = stream.get_final_message()
         # Concatenate text blocks; ignore thinking blocks (they're internal).
-        text_parts = [b.text for b in response.content if b.type == "text"]
+        text_parts = [b.text for b in message.content if b.type == "text"]
         return "\n".join(text_parts)
 
 
